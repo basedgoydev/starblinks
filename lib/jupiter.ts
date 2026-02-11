@@ -8,9 +8,9 @@ import {
 } from "@solana/web3.js";
 import { WSOL_MINT } from "./constants";
 
-const JUPITER_QUOTE_API = "https://api.jup.ag/swap/v1/quote";
-const JUPITER_SWAP_INSTRUCTIONS_API = "https://api.jup.ag/swap/v1/swap-instructions";
-const JUPITER_SWAP_API = "https://api.jup.ag/swap/v1/swap";
+const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
+const JUPITER_SWAP_INSTRUCTIONS_API = "https://lite-api.jup.ag/swap/v1/swap-instructions";
+const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
 
 interface QuoteResponse {
   inputMint: string;
