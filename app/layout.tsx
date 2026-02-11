@@ -5,18 +5,18 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PumpBlinks - Buy Pump.fun Tokens via Twitter",
+  title: "StarBlinks - Buy Pump.fun Tokens via Twitter",
   description:
     "One-click purchase of any Pump.fun token via Twitter Blinks. Earn 0.2% affiliate fees by sharing links.",
   openGraph: {
-    title: "PumpBlinks - Buy Pump.fun Tokens via Twitter",
+    title: "StarBlinks - Buy Pump.fun Tokens via Twitter",
     description:
       "One-click purchase of any Pump.fun token via Twitter Blinks. Earn 0.2% affiliate fees by sharing links.",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "PumpBlinks - Buy Pump.fun Tokens via Twitter",
+    title: "StarBlinks - Buy Pump.fun Tokens via Twitter",
     description:
       "One-click purchase of any Pump.fun token via Twitter Blinks. Earn 0.2% affiliate fees by sharing links.",
   },

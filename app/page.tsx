@@ -7,7 +7,7 @@ export default function Home() {
       <div className="max-w-6xl mx-auto px-4 py-20">
         <div className="text-center mb-16">
           <h1 className="text-5xl md:text-7xl font-bold mb-6">
-            <span className="text-pump-green">Pump</span>Blinks
+            <span className="text-pump-green">Star</span>Blinks
           </h1>
           <p className="text-xl md:text-2xl text-gray-400 max-w-3xl mx-auto mb-8">
             Buy any Pump.fun token with one click directly from Twitter.
@@ -22,7 +22,7 @@ export default function Home() {
               Create Affiliate Link
             </Link>
             <a
-              href="https://github.com/starcat-team/pumpblinks"
+              href="https://github.com/basedgoydev/starblinks"
               target="_blank"
               rel="noopener noreferrer"
               className="px-8 py-4 bg-pump-gray text-white font-bold rounded-lg hover:bg-gray-700 transition-colors text-lg"
@@ -116,7 +116,7 @@ export default function Home() {
                   <div className="w-12 h-12 bg-pump-green rounded-full"></div>
                   <div>
                     <div className="font-bold">$EXAMPLE</div>
-                    <div className="text-sm text-gray-400">Buy via PumpBlinks</div>
+                    <div className="text-sm text-gray-400">Buy via StarBlinks</div>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -204,7 +204,7 @@ export default function Home() {
           </div>
           <div className="flex gap-6">
             <a
-              href="https://github.com/starcat-team/pumpblinks"
+              href="https://github.com/basedgoydev/starblinks"
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-white transition-colors"

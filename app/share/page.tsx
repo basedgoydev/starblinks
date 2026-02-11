@@ -69,7 +69,7 @@ export default function SharePage() {
     <div className="min-h-screen bg-pump-dark text-white">
       <div className="max-w-2xl mx-auto px-4 py-16">
         <h1 className="text-4xl font-bold mb-2 text-center">
-          <span className="text-pump-green">PumpBlinks</span> Affiliate Links
+          <span className="text-pump-green">StarBlinks</span> Affiliate Links
         </h1>
         <p className="text-gray-400 text-center mb-12">
           Generate affiliate links and earn 0.2% on every purchase made through your link

@@ -60,7 +60,7 @@ export default async function BuyPage({ params, searchParams }: BuyPageProps) {
             href="/"
             className="block w-full py-3 bg-pump-dark text-white font-bold rounded-lg hover:bg-gray-700 transition-colors border border-gray-700"
           >
-            Learn More About PumpBlinks
+            Learn More About StarBlinks
           </Link>
         </div>
 
