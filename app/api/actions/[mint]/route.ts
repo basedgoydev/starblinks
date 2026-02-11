@@ -38,8 +38,9 @@ export async function GET(
       getTokenState(getConnection(), mint),
     ]);
 
-    // Get referrer from URL params
+    // Get referrer from URL params and base URL
     const url = new URL(request.url);
+    const baseUrl = `${url.protocol}//${url.host}`;
     const ref = url.searchParams.get("ref");
     const refParam = ref ? `&ref=${ref}` : "";
 
@@ -67,19 +68,19 @@ export async function GET(
         actions: [
           {
             label: "0.1 SOL",
-            href: `/api/actions/${mintStr}?amount=0.1${refParam}`,
+            href: `${baseUrl}/api/actions/${mintStr}?amount=0.1${refParam}`,
           },
           {
             label: "0.5 SOL",
-            href: `/api/actions/${mintStr}?amount=0.5${refParam}`,
+            href: `${baseUrl}/api/actions/${mintStr}?amount=0.5${refParam}`,
           },
           {
             label: "1 SOL",
-            href: `/api/actions/${mintStr}?amount=1${refParam}`,
+            href: `${baseUrl}/api/actions/${mintStr}?amount=1${refParam}`,
           },
           {
             label: "Custom",
-            href: `/api/actions/${mintStr}?amount={amount}${refParam}`,
+            href: `${baseUrl}/api/actions/${mintStr}?amount={amount}${refParam}`,
             parameters: [
               {
                 name: "amount",
