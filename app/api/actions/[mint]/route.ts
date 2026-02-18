@@ -54,10 +54,8 @@ export async function GET(
         ? `Price: ${price.toFixed(10)} SOL per token`
         : `Token on bonding curve`;
     }
-    // Add fee info - fees only on bonding curve tokens
-    if (!tokenState.isGraduated) {
-      description += ` | ${TOTAL_FEE_BPS / 100}% fee${ref ? " (incl. affiliate)" : ""}`;
-    }
+    // Add fee info
+    description += ` | ${TOTAL_FEE_BPS / 100}% fee${ref ? " (incl. affiliate)" : ""}`;
 
     const response = {
       type: "action",
@@ -201,13 +199,11 @@ export async function POST(
     // Build response message
     const feePercent = TOTAL_FEE_BPS / 100;
     const routeInfo = tokenState.isGraduated
-      ? "via Jupiter"
+      ? "via PumpSwap"
       : "via Pump.fun bonding curve";
-    // Fees only on bonding curve tokens
-    const feeInfo = !tokenState.isGraduated
-      ? ` (${feePercent}% fee${referrer ? " incl. affiliate" : ""})`
-      : "";
-    const message = `Buying with ${amount} SOL${feeInfo} ${routeInfo}`;
+    const message = `Buying with ${amount} SOL (${feePercent}% fee${
+      referrer ? " incl. affiliate" : ""
+    }) ${routeInfo}`;
 
     return NextResponse.json(
       { transaction, message },

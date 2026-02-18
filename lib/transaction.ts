@@ -2,16 +2,24 @@ import {
   Connection,
   PublicKey,
   Transaction,
-  VersionedTransaction,
-  TransactionMessage,
-  AddressLookupTableAccount,
+  SystemProgram,
 } from "@solana/web3.js";
+import {
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+  createSyncNativeInstruction,
+  NATIVE_MINT,
+} from "@solana/spl-token";
 import { getConnection } from "./connection";
 import { getTokenState, TokenState } from "./token-state";
 import { buildPumpBuyInstructions } from "./pump";
-import { buildJupiterSwapInstructions } from "./jupiter";
+import {
+  findPumpSwapPool,
+  buildPumpSwapBuyInstructions,
+  getPoolReserves,
+  calculatePumpSwapOutput,
+} from "./pumpswap";
 import { calculateFees, buildFeeInstructions, FeeBreakdown } from "./fees";
-import { PLATFORM_WALLET } from "./constants";
 
 interface BuildTransactionParams {
   mint: PublicKey;
@@ -52,8 +60,6 @@ export async function buildBuyTransaction({
     ? feeBreakdown.netAmountLamports
     : solAmountLamports;
 
-  let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
-
   // Build swap instructions based on token state
   if (!tokenState.isGraduated && tokenState.bondingCurve) {
     // Token is on bonding curve - use Pump.fun SDK
@@ -90,71 +96,74 @@ export async function buildBuyTransaction({
       feeBreakdown,
     };
   } else {
-    // Token is graduated - use Jupiter API
-    // NO FEES on Jupiter trades - too many simulation issues with multiple transfers
-    const {
-      instructions: jupiterInstructions,
-      addressLookupTableAccounts: alts,
-      wrapInstructions,
-    } = await buildJupiterSwapInstructions(
-      connection,
-      mint,
-      buyer,
-      solAmountLamports, // Full amount (no fees)
-      solAmountLamports, // Total SOL to wrap
-      BigInt(0), // No fees
-      null // No platform wallet
+    // Token is graduated - use PumpSwap
+    const pool = await findPumpSwapPool(connection, mint);
+    if (!pool) {
+      throw new Error("Token pool not found on PumpSwap");
+    }
+
+    // Get pool reserves for output calculation
+    const { solReserve, tokenReserve } = await getPoolReserves(connection, pool);
+
+    // Calculate minimum tokens out with 1% slippage
+    const expectedTokens = calculatePumpSwapOutput(netAmountLamports, solReserve, tokenReserve);
+    const minTokensOut = (expectedTokens * BigInt(99)) / BigInt(100); // 1% slippage
+
+    // Build wrap SOL instructions
+    const wrapInstructions = [];
+    const buyerWsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, buyer, false);
+
+    // Check if WSOL ATA exists
+    const buyerWsolAtaInfo = await connection.getAccountInfo(buyerWsolAta);
+    if (!buyerWsolAtaInfo) {
+      wrapInstructions.push(
+        createAssociatedTokenAccountInstruction(buyer, buyerWsolAta, buyer, NATIVE_MINT)
+      );
+    }
+
+    // Transfer SOL to WSOL ATA and sync
+    wrapInstructions.push(
+      SystemProgram.transfer({
+        fromPubkey: buyer,
+        toPubkey: buyerWsolAta,
+        lamports: netAmountLamports,
+      }),
+      createSyncNativeInstruction(buyerWsolAta)
     );
 
-    addressLookupTableAccounts = alts;
+    // Build PumpSwap buy instructions
+    const pumpSwapInstructions = await buildPumpSwapBuyInstructions({
+      connection,
+      pool,
+      buyer,
+      solAmountLamports: netAmountLamports,
+      minTokensOut,
+    });
 
+    // Build legacy transaction
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash();
 
-    // Order: 1) wrap SOL, 2) Jupiter swap
-    const allInstructions = [
-      ...wrapInstructions,
-      ...jupiterInstructions,
-    ];
+    const tx = new Transaction({
+      feePayer: buyer,
+      blockhash,
+      lastValidBlockHeight,
+    });
 
-    if (addressLookupTableAccounts.length > 0) {
-      // Build versioned transaction with ALTs
-      const message = new TransactionMessage({
-        payerKey: buyer,
-        recentBlockhash: blockhash,
-        instructions: allInstructions,
-      }).compileToV0Message(addressLookupTableAccounts);
+    // Order: 1) fees, 2) wrap SOL, 3) PumpSwap
+    tx.add(...feeInstructions);
+    tx.add(...wrapInstructions);
+    tx.add(...pumpSwapInstructions);
 
-      const versionedTx = new VersionedTransaction(message);
+    const serialized = tx
+      .serialize({ requireAllSignatures: false, verifySignatures: false })
+      .toString("base64");
 
-      const serialized = Buffer.from(versionedTx.serialize()).toString("base64");
-
-      return {
-        transaction: serialized,
-        isVersioned: true,
-        tokenState,
-        feeBreakdown,
-      };
-    } else {
-      // Build legacy transaction
-      const tx = new Transaction({
-        feePayer: buyer,
-        blockhash,
-        lastValidBlockHeight,
-      });
-
-      tx.add(...allInstructions);
-
-      const serialized = tx
-        .serialize({ requireAllSignatures: false, verifySignatures: false })
-        .toString("base64");
-
-      return {
-        transaction: serialized,
-        isVersioned: false,
-        tokenState,
-        feeBreakdown,
-      };
-    }
+    return {
+      transaction: serialized,
+      isVersioned: false,
+      tokenState,
+      feeBreakdown,
+    };
   }
 }
