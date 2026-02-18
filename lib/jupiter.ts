@@ -4,7 +4,10 @@ import {
   TransactionInstruction,
   AddressLookupTableAccount,
 } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountInstruction,
+} from "@solana/spl-token";
 import { WSOL_MINT } from "./constants";
 
 const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
@@ -69,6 +72,17 @@ export async function buildJupiterSwapInstructions(
   // This is where Jupiter will send the platform fee (in output tokens)
   const feeAccount = getAssociatedTokenAddressSync(mint, platformWallet, true);
 
+  // Check if fee account exists, we may need to create it
+  const feeAccountInfo = await connection.getAccountInfo(feeAccount);
+  const createFeeAccountIx = feeAccountInfo
+    ? null
+    : createAssociatedTokenAccountInstruction(
+        buyer, // payer
+        feeAccount,
+        platformWallet,
+        mint
+      );
+
   // Get swap instructions with fee account
   const swapResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
     method: "POST",
@@ -91,6 +105,11 @@ export async function buildJupiterSwapInstructions(
 
   // Convert serialized instructions
   const instructions: TransactionInstruction[] = [];
+
+  // Create fee account if it doesn't exist (buyer pays rent)
+  if (createFeeAccountIx) {
+    instructions.push(createFeeAccountIx);
+  }
 
   for (const ix of swapData.computeBudgetInstructions) {
     instructions.push(deserializeInstruction(ix));
