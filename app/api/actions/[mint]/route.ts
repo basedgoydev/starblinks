@@ -87,7 +87,7 @@ export async function GET(
                 label: "SOL amount",
                 type: "number",
                 required: true,
-                min: 0.001,
+                min: 0.05,
                 max: 100,
               },
             ],
@@ -139,9 +139,9 @@ export async function POST(
       );
     }
 
-    if (amount < 0.001) {
+    if (amount < 0.05) {
       return NextResponse.json(
-        { error: "Minimum amount is 0.001 SOL" },
+        { error: "Minimum amount is 0.05 SOL" },
         { status: 400, headers: ACTIONS_CORS_HEADERS }
       );
     }
