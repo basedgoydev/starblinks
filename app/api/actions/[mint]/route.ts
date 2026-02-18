@@ -54,7 +54,9 @@ export async function GET(
         ? `Price: ${price.toFixed(10)} SOL per token`
         : `Token on bonding curve`;
     }
-    // FEES DISABLED for Dialect approval
+    // Add fee info
+    const feeType = tokenState.isGraduated ? "in tokens" : "in SOL";
+    description += ` | ${TOTAL_FEE_BPS / 100}% fee ${feeType}${ref ? " (incl. affiliate)" : ""}`;
 
     const response = {
       type: "action",
@@ -196,10 +198,12 @@ export async function POST(
     });
 
     // Build response message
+    const feePercent = TOTAL_FEE_BPS / 100;
     const routeInfo = tokenState.isGraduated
-      ? "via PumpSwap"
+      ? "via Jupiter"
       : "via Pump.fun bonding curve";
-    const message = `Buying with ${amount} SOL ${routeInfo}`;
+    const feeType = tokenState.isGraduated ? "in tokens" : "in SOL";
+    const message = `Buying with ${amount} SOL (${feePercent}% fee ${feeType}) ${routeInfo}`;
 
     return NextResponse.json(
       { transaction, message },

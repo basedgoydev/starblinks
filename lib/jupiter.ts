@@ -2,23 +2,13 @@ import {
   Connection,
   PublicKey,
   TransactionInstruction,
-  VersionedTransaction,
-  TransactionMessage,
   AddressLookupTableAccount,
-  SystemProgram,
 } from "@solana/web3.js";
-import {
-  getAssociatedTokenAddressSync,
-  createAssociatedTokenAccountInstruction,
-  createSyncNativeInstruction,
-  createTransferInstruction,
-  NATIVE_MINT,
-} from "@solana/spl-token";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { WSOL_MINT } from "./constants";
 
 const JUPITER_QUOTE_API = "https://lite-api.jup.ag/swap/v1/quote";
 const JUPITER_SWAP_INSTRUCTIONS_API = "https://lite-api.jup.ag/swap/v1/swap-instructions";
-const JUPITER_SWAP_API = "https://lite-api.jup.ag/swap/v1/swap";
 
 interface QuoteResponse {
   inputMint: string;
@@ -27,8 +17,6 @@ interface QuoteResponse {
   outAmount: string;
   priceImpactPct: string;
   routePlan: unknown[];
-  contextSlot: number;
-  timeTaken: number;
 }
 
 interface SwapInstructionsResponse {
@@ -45,123 +33,75 @@ interface SerializedInstruction {
   data: string;
 }
 
-export async function getJupiterQuote(
-  outputMint: PublicKey,
-  solAmountLamports: bigint,
-  slippageBps: number = 100 // 1% default
-): Promise<QuoteResponse> {
-  const url = new URL(JUPITER_QUOTE_API);
-  url.searchParams.set("inputMint", WSOL_MINT.toBase58());
-  url.searchParams.set("outputMint", outputMint.toBase58());
-  url.searchParams.set("amount", solAmountLamports.toString());
-  url.searchParams.set("slippageBps", slippageBps.toString());
-
-  const response = await fetch(url.toString());
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Jupiter quote failed: ${error}`);
-  }
-
-  return response.json();
-}
-
+/**
+ * Build Jupiter swap instructions with platform fee
+ * Fee is taken from output tokens and sent to platform's token account
+ */
 export async function buildJupiterSwapInstructions(
   connection: Connection,
   mint: PublicKey,
   buyer: PublicKey,
   solAmountLamports: bigint,
-  totalSolWithFees: bigint, // Total SOL to wrap (including fees)
-  feeLamports: bigint, // Fee to transfer as wSOL
-  platformWallet: PublicKey | null,
+  platformFeeBps: number, // Fee in basis points (50 = 0.5%)
+  platformWallet: PublicKey,
   slippageBps: number = 100
 ): Promise<{
   instructions: TransactionInstruction[];
   addressLookupTableAccounts: AddressLookupTableAccount[];
-  wrapInstructions: TransactionInstruction[];
-  feeInstructions: TransactionInstruction[];
 }> {
-  // Step 1: Get quote for the NET amount (after fees)
-  const quote = await getJupiterQuote(mint, solAmountLamports, slippageBps);
+  // Get quote with platform fee
+  const quoteUrl = new URL(JUPITER_QUOTE_API);
+  quoteUrl.searchParams.set("inputMint", WSOL_MINT.toBase58());
+  quoteUrl.searchParams.set("outputMint", mint.toBase58());
+  quoteUrl.searchParams.set("amount", solAmountLamports.toString());
+  quoteUrl.searchParams.set("slippageBps", slippageBps.toString());
+  quoteUrl.searchParams.set("platformFeeBps", platformFeeBps.toString());
 
-  // Step 2: Build wSOL wrap instructions - wrap TOTAL amount (including fees)
-  const wsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, buyer, false);
-  const wrapInstructions: TransactionInstruction[] = [];
-  const feeInstructions: TransactionInstruction[] = [];
-
-  // Check if wSOL ATA exists
-  const wsolAtaInfo = await connection.getAccountInfo(wsolAta);
-  if (!wsolAtaInfo) {
-    // Create wSOL ATA
-    wrapInstructions.push(
-      createAssociatedTokenAccountInstruction(buyer, wsolAta, buyer, NATIVE_MINT)
-    );
+  const quoteResponse = await fetch(quoteUrl.toString());
+  if (!quoteResponse.ok) {
+    const error = await quoteResponse.text();
+    throw new Error(`Jupiter quote failed: ${error}`);
   }
 
-  // Transfer ALL SOL (including fees) to wSOL ATA and sync
-  wrapInstructions.push(
-    SystemProgram.transfer({
-      fromPubkey: buyer,
-      toPubkey: wsolAta,
-      lamports: totalSolWithFees,
-    }),
-    createSyncNativeInstruction(wsolAta)
-  );
+  const quote: QuoteResponse = await quoteResponse.json();
 
-  // Transfer fee as wSOL to platform wallet
-  if (platformWallet && feeLamports > BigInt(0)) {
-    const platformWsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, platformWallet, false);
+  // Fee account = platform's token account for the OUTPUT token
+  // This is where Jupiter will send the platform fee (in output tokens)
+  const feeAccount = getAssociatedTokenAddressSync(mint, platformWallet, true);
 
-    // Check if platform wSOL ATA exists
-    const platformWsolAtaInfo = await connection.getAccountInfo(platformWsolAta);
-    if (!platformWsolAtaInfo) {
-      feeInstructions.push(
-        createAssociatedTokenAccountInstruction(buyer, platformWsolAta, platformWallet, NATIVE_MINT)
-      );
-    }
-
-    // Transfer wSOL fee to platform
-    feeInstructions.push(
-      createTransferInstruction(wsolAta, platformWsolAta, buyer, feeLamports)
-    );
-  }
-
-  // Step 3: Get swap instructions (wrapAndUnwrapSol: false since we handle it)
-  const swapInstructionsResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
+  // Get swap instructions with fee account
+  const swapResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userPublicKey: buyer.toBase58(),
       quoteResponse: quote,
-      wrapAndUnwrapSol: false, // We handle wrapping ourselves
+      wrapAndUnwrapSol: true, // Jupiter handles SOL wrapping
       dynamicComputeUnitLimit: true,
+      feeAccount: feeAccount.toBase58(), // Platform receives fee in output tokens
     }),
   });
 
-  if (!swapInstructionsResponse.ok) {
-    // Fallback to /swap endpoint if /swap-instructions is not available
-    return buildJupiterSwapFallback(connection, mint, buyer, quote, wrapInstructions, feeInstructions);
+  if (!swapResponse.ok) {
+    const error = await swapResponse.text();
+    throw new Error(`Jupiter swap instructions failed: ${error}`);
   }
 
-  const swapData: SwapInstructionsResponse = await swapInstructionsResponse.json();
+  const swapData: SwapInstructionsResponse = await swapResponse.json();
 
-  // Convert serialized instructions to TransactionInstruction objects
+  // Convert serialized instructions
   const instructions: TransactionInstruction[] = [];
 
-  // Add compute budget instructions
   for (const ix of swapData.computeBudgetInstructions) {
     instructions.push(deserializeInstruction(ix));
   }
 
-  // Add setup instructions (create output ATA, etc - but NOT wrap SOL)
   for (const ix of swapData.setupInstructions) {
     instructions.push(deserializeInstruction(ix));
   }
 
-  // Add swap instruction
   instructions.push(deserializeInstruction(swapData.swapInstruction));
 
-  // Add cleanup instruction if present (but NOT unwrap - we handle that)
   if (swapData.cleanupInstruction) {
     instructions.push(deserializeInstruction(swapData.cleanupInstruction));
   }
@@ -172,71 +112,7 @@ export async function buildJupiterSwapInstructions(
     swapData.addressLookupTableAddresses
   );
 
-  return { instructions, addressLookupTableAccounts, wrapInstructions, feeInstructions };
-}
-
-async function buildJupiterSwapFallback(
-  connection: Connection,
-  mint: PublicKey,
-  buyer: PublicKey,
-  quote: QuoteResponse,
-  wrapInstructions: TransactionInstruction[],
-  feeInstructions: TransactionInstruction[]
-): Promise<{
-  instructions: TransactionInstruction[];
-  addressLookupTableAccounts: AddressLookupTableAccount[];
-  wrapInstructions: TransactionInstruction[];
-  feeInstructions: TransactionInstruction[];
-}> {
-  // Fallback: Use /swap endpoint and deserialize the transaction
-  const swapResponse = await fetch(JUPITER_SWAP_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      userPublicKey: buyer.toBase58(),
-      quoteResponse: quote,
-      wrapAndUnwrapSol: false, // We handle wrapping ourselves
-      dynamicComputeUnitLimit: true,
-    }),
-  });
-
-  if (!swapResponse.ok) {
-    const error = await swapResponse.text();
-    throw new Error(`Jupiter swap failed: ${error}`);
-  }
-
-  const { swapTransaction } = await swapResponse.json();
-
-  // Deserialize the versioned transaction
-  const txBuffer = Buffer.from(swapTransaction, "base64");
-  const versionedTx = VersionedTransaction.deserialize(txBuffer);
-
-  // Extract instructions from the transaction message
-  const message = versionedTx.message;
-
-  // Load address lookup tables
-  const addressLookupTableAccounts: AddressLookupTableAccount[] = [];
-  if (message.addressTableLookups.length > 0) {
-    const altAddresses = message.addressTableLookups.map((alt) => alt.accountKey);
-    for (const address of altAddresses) {
-      const altAccount = await connection.getAddressLookupTable(address);
-      if (altAccount.value) {
-        addressLookupTableAccounts.push(altAccount.value);
-      }
-    }
-  }
-
-  // Decompile the message to get instructions
-  const decompiledMessage = TransactionMessage.decompile(message, {
-    addressLookupTableAccounts,
-  });
-
-  return {
-    instructions: decompiledMessage.instructions,
-    addressLookupTableAccounts,
-    wrapInstructions,
-    feeInstructions,
-  };
+  return { instructions, addressLookupTableAccounts };
 }
 
 function deserializeInstruction(ix: SerializedInstruction): TransactionInstruction {

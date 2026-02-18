@@ -3,12 +3,15 @@ import {
   PublicKey,
   Transaction,
   VersionedTransaction,
+  TransactionMessage,
+  AddressLookupTableAccount,
 } from "@solana/web3.js";
 import { getConnection } from "./connection";
 import { getTokenState, TokenState } from "./token-state";
 import { buildPumpBuyInstructions } from "./pump";
-import { getPumpSwapTransaction } from "./pumpswap";
+import { buildJupiterSwapInstructions } from "./jupiter";
 import { calculateFees, buildFeeInstructions, FeeBreakdown } from "./fees";
+import { PLATFORM_WALLET, TOTAL_FEE_BPS } from "./constants";
 
 interface BuildTransactionParams {
   mint: PublicKey;
@@ -40,13 +43,15 @@ export async function buildBuyTransaction({
 
   // Build swap instructions based on token state
   if (!tokenState.isGraduated && tokenState.bondingCurve) {
-    // Token is on bonding curve - use Pump.fun SDK
-    // FEES DISABLED for Dialect approval - re-enable later
+    // Token is on bonding curve - use Pump.fun SDK with SOL fees
+    const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
+    const netAmountLamports = feeBreakdown.netAmountLamports;
+
     const pumpInstructions = await buildPumpBuyInstructions({
       connection,
       mint,
       buyer,
-      solAmountLamports: solAmountLamports, // Full amount, no fees
+      solAmountLamports: netAmountLamports,
       tokenState,
     });
 
@@ -60,7 +65,8 @@ export async function buildBuyTransaction({
       lastValidBlockHeight,
     });
 
-    // FEES DISABLED - just add swap
+    // Add fee instructions first, then swap
+    tx.add(...feeInstructions);
     tx.add(...pumpInstructions);
 
     const serialized = tx
@@ -74,22 +80,58 @@ export async function buildBuyTransaction({
       feeBreakdown,
     };
   } else {
-    // Token is graduated - use pumpportal.fun API (no fees for now)
-    // The API handles everything including pool detection
-    const swapTx = await getPumpSwapTransaction(
-      buyer.toBase58(),
-      mint.toBase58(),
+    // Token is graduated - use Jupiter with platform fee (fee in output tokens)
+    const {
+      instructions: jupiterInstructions,
+      addressLookupTableAccounts,
+    } = await buildJupiterSwapInstructions(
+      connection,
+      mint,
+      buyer,
       solAmountLamports,
-      100 // 1% slippage
+      TOTAL_FEE_BPS, // Platform fee in bps (taken from output tokens)
+      PLATFORM_WALLET
     );
 
-    const serialized = Buffer.from(swapTx.serialize()).toString("base64");
+    const { blockhash } = await connection.getLatestBlockhash();
 
-    return {
-      transaction: serialized,
-      isVersioned: true,
-      tokenState,
-      feeBreakdown,
-    };
+    if (addressLookupTableAccounts.length > 0) {
+      // Build versioned transaction with ALTs
+      const message = new TransactionMessage({
+        payerKey: buyer,
+        recentBlockhash: blockhash,
+        instructions: jupiterInstructions,
+      }).compileToV0Message(addressLookupTableAccounts);
+
+      const versionedTx = new VersionedTransaction(message);
+      const serialized = Buffer.from(versionedTx.serialize()).toString("base64");
+
+      return {
+        transaction: serialized,
+        isVersioned: true,
+        tokenState,
+        feeBreakdown,
+      };
+    } else {
+      // Build legacy transaction
+      const tx = new Transaction({
+        feePayer: buyer,
+        blockhash,
+        lastValidBlockHeight: (await connection.getLatestBlockhash()).lastValidBlockHeight,
+      });
+
+      tx.add(...jupiterInstructions);
+
+      const serialized = tx
+        .serialize({ requireAllSignatures: false, verifySignatures: false })
+        .toString("base64");
+
+      return {
+        transaction: serialized,
+        isVersioned: false,
+        tokenState,
+        feeBreakdown,
+      };
+    }
   }
 }
