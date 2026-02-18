@@ -37,21 +37,14 @@ export async function buildBuyTransaction({
   // Get token state to determine routing
   const tokenState = await getTokenState(connection, mint);
 
-  // Fees only apply to bonding curve tokens (not graduated/Jupiter)
-  // Jupiter's wrapAndUnwrapSol conflicts with separate SOL transfers
-  const applyFees = !tokenState.isGraduated && tokenState.bondingCurve;
-
+  // Calculate fees (apply to all tokens now)
   const feeBreakdown = calculateFees(solAmountLamports, referrer !== null);
 
-  // Only build fee instructions for bonding curve tokens
-  const feeInstructions = applyFees
-    ? buildFeeInstructions(buyer, referrer, feeBreakdown)
-    : [];
+  // Build fee transfer instructions
+  const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
 
-  // Net amount: deduct fees only for bonding curve tokens
-  const netAmountLamports = applyFees
-    ? feeBreakdown.netAmountLamports
-    : solAmountLamports;
+  // Net amount after fees for the actual swap
+  const netAmountLamports = feeBreakdown.netAmountLamports;
 
   let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 
@@ -92,21 +85,30 @@ export async function buildBuyTransaction({
     };
   } else {
     // Token is graduated - use Jupiter API
-    const { instructions: jupiterInstructions, addressLookupTableAccounts: alts } =
-      await buildJupiterSwapInstructions(
-        connection,
-        mint,
-        buyer,
-        netAmountLamports
-      );
+    const {
+      instructions: jupiterInstructions,
+      addressLookupTableAccounts: alts,
+      wrapInstructions,
+      unwrapInstructions,
+    } = await buildJupiterSwapInstructions(
+      connection,
+      mint,
+      buyer,
+      netAmountLamports
+    );
 
     addressLookupTableAccounts = alts;
 
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash();
 
-    // Combine fee instructions with Jupiter instructions
-    const allInstructions = [...feeInstructions, ...jupiterInstructions];
+    // Order: 1) fees, 2) wrap SOL, 3) Jupiter swap, 4) unwrap remaining wSOL
+    const allInstructions = [
+      ...feeInstructions,
+      ...wrapInstructions,
+      ...jupiterInstructions,
+      ...unwrapInstructions,
+    ];
 
     if (addressLookupTableAccounts.length > 0) {
       // Build versioned transaction with ALTs

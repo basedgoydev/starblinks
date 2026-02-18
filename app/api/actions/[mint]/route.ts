@@ -47,16 +47,15 @@ export async function GET(
     // Build description
     let description: string;
     if (tokenState.isGraduated) {
-      // No fees for graduated tokens (Jupiter)
       description = `Graduated token | Trading on Jupiter`;
     } else {
       const price = calculatePrice(tokenState);
       description = price
         ? `Price: ${price.toFixed(10)} SOL per token`
         : `Token on bonding curve`;
-      // Add fee info only for bonding curve tokens
-      description += ` | ${TOTAL_FEE_BPS / 100}% fee${ref ? " (incl. affiliate)" : ""}`;
     }
+    // Add fee info for all tokens
+    description += ` | ${TOTAL_FEE_BPS / 100}% fee${ref ? " (incl. affiliate)" : ""}`;
 
     const response = {
       type: "action",
@@ -202,11 +201,9 @@ export async function POST(
     const routeInfo = tokenState.isGraduated
       ? "via Jupiter"
       : "via Pump.fun bonding curve";
-    // Only show fee info for bonding curve tokens
-    const feeInfo = tokenState.isGraduated
-      ? ""
-      : ` (${feePercent}% fee${referrer ? " incl. affiliate" : ""})`;
-    const message = `Buying with ${amount} SOL${feeInfo} ${routeInfo}`;
+    const message = `Buying with ${amount} SOL (${feePercent}% fee${
+      referrer ? " incl. affiliate" : ""
+    }) ${routeInfo}`;
 
     return NextResponse.json(
       { transaction, message },
