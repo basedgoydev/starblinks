@@ -52,13 +52,13 @@ export async function buildJupiterSwapInstructions(
   instructions: TransactionInstruction[];
   addressLookupTableAccounts: AddressLookupTableAccount[];
 }> {
-  // Get quote with platform fee
+  // Get quote (platform fee disabled for now - lite API may not support it)
   const quoteUrl = new URL(JUPITER_QUOTE_API);
   quoteUrl.searchParams.set("inputMint", WSOL_MINT.toBase58());
   quoteUrl.searchParams.set("outputMint", mint.toBase58());
   quoteUrl.searchParams.set("amount", solAmountLamports.toString());
   quoteUrl.searchParams.set("slippageBps", slippageBps.toString());
-  quoteUrl.searchParams.set("platformFeeBps", platformFeeBps.toString());
+  // platformFeeBps disabled - lite API doesn't support it well
 
   const quoteResponse = await fetch(quoteUrl.toString());
   if (!quoteResponse.ok) {
@@ -68,31 +68,15 @@ export async function buildJupiterSwapInstructions(
 
   const quote: QuoteResponse = await quoteResponse.json();
 
-  // Fee account = platform's token account for the OUTPUT token
-  // This is where Jupiter will send the platform fee (in output tokens)
-  const feeAccount = getAssociatedTokenAddressSync(mint, platformWallet, true);
-
-  // Check if fee account exists, we may need to create it
-  const feeAccountInfo = await connection.getAccountInfo(feeAccount);
-  const createFeeAccountIx = feeAccountInfo
-    ? null
-    : createAssociatedTokenAccountInstruction(
-        buyer, // payer
-        feeAccount,
-        platformWallet,
-        mint
-      );
-
-  // Get swap instructions with fee account
+  // Get swap instructions (no platform fee for now)
   const swapResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       userPublicKey: buyer.toBase58(),
       quoteResponse: quote,
-      wrapAndUnwrapSol: true, // Jupiter handles SOL wrapping
+      wrapAndUnwrapSol: true,
       dynamicComputeUnitLimit: true,
-      feeAccount: feeAccount.toBase58(), // Platform receives fee in output tokens
     }),
   });
 
@@ -105,11 +89,6 @@ export async function buildJupiterSwapInstructions(
 
   // Convert serialized instructions
   const instructions: TransactionInstruction[] = [];
-
-  // Create fee account if it doesn't exist (buyer pays rent)
-  if (createFeeAccountIx) {
-    instructions.push(createFeeAccountIx);
-  }
 
   for (const ix of swapData.computeBudgetInstructions) {
     instructions.push(deserializeInstruction(ix));
