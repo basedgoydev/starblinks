@@ -43,15 +43,12 @@ export async function buildBuyTransaction({
 
   // Build swap instructions based on token state
   if (!tokenState.isGraduated && tokenState.bondingCurve) {
-    // Token is on bonding curve - use Pump.fun SDK with SOL fees
-    const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
-    const netAmountLamports = feeBreakdown.netAmountLamports;
-
+    // Token is on bonding curve - use Pump.fun SDK (fees disabled for now)
     const pumpInstructions = await buildPumpBuyInstructions({
       connection,
       mint,
       buyer,
-      solAmountLamports: netAmountLamports,
+      solAmountLamports,
       tokenState,
     });
 
@@ -65,8 +62,7 @@ export async function buildBuyTransaction({
       lastValidBlockHeight,
     });
 
-    // Add fee instructions first, then swap
-    tx.add(...feeInstructions);
+    // Add swap instructions (no fees)
     tx.add(...pumpInstructions);
 
     const serialized = tx
