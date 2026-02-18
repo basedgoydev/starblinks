@@ -2,6 +2,7 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   VersionedTransaction,
   TransactionMessage,
   AddressLookupTableAccount,
@@ -37,14 +38,12 @@ export async function buildBuyTransaction({
   // Get token state to determine routing
   const tokenState = await getTokenState(connection, mint);
 
-  // Calculate fees (apply to all tokens now)
+  // Calculate fees
   const feeBreakdown = calculateFees(solAmountLamports, referrer !== null);
 
-  // Build fee transfer instructions
-  const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
-
-  // Net amount after fees for the actual swap
-  const netAmountLamports = feeBreakdown.netAmountLamports;
+  // TEMPORARILY DISABLED to debug
+  const feeInstructions: TransactionInstruction[] = [];
+  const netAmountLamports = solAmountLamports;
 
   let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 
