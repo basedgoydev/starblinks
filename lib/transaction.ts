@@ -37,14 +37,15 @@ export async function buildBuyTransaction({
   // Get token state to determine routing
   const tokenState = await getTokenState(connection, mint);
 
-  // Calculate fees
+  // Calculate fees (temporarily disabled for testing)
   const feeBreakdown = calculateFees(solAmountLamports, referrer !== null);
 
-  // Build fee transfer instructions
-  const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
+  // TEMPORARILY DISABLED: Build fee transfer instructions
+  // const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
+  const feeInstructions: any[] = []; // Empty - no fees for now
 
-  // Net amount after fees for the actual swap
-  const netAmountLamports = feeBreakdown.netAmountLamports;
+  // Use full amount for swap (fees disabled)
+  const netAmountLamports = solAmountLamports;
 
   let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 
