@@ -11,8 +11,7 @@ import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountInstruction,
   createSyncNativeInstruction,
-  createCloseAccountInstruction,
-  TOKEN_PROGRAM_ID,
+  createTransferInstruction,
   NATIVE_MINT,
 } from "@solana/spl-token";
 import { WSOL_MINT } from "./constants";
@@ -72,20 +71,23 @@ export async function buildJupiterSwapInstructions(
   mint: PublicKey,
   buyer: PublicKey,
   solAmountLamports: bigint,
+  totalSolWithFees: bigint, // Total SOL to wrap (including fees)
+  feeLamports: bigint, // Fee to transfer as wSOL
+  platformWallet: PublicKey | null,
   slippageBps: number = 100
 ): Promise<{
   instructions: TransactionInstruction[];
   addressLookupTableAccounts: AddressLookupTableAccount[];
   wrapInstructions: TransactionInstruction[];
-  unwrapInstructions: TransactionInstruction[];
+  feeInstructions: TransactionInstruction[];
 }> {
-  // Step 1: Get quote
+  // Step 1: Get quote for the NET amount (after fees)
   const quote = await getJupiterQuote(mint, solAmountLamports, slippageBps);
 
-  // Step 2: Build wSOL wrap instructions (we handle this ourselves for fee compatibility)
+  // Step 2: Build wSOL wrap instructions - wrap TOTAL amount (including fees)
   const wsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, buyer, false);
   const wrapInstructions: TransactionInstruction[] = [];
-  const unwrapInstructions: TransactionInstruction[] = [];
+  const feeInstructions: TransactionInstruction[] = [];
 
   // Check if wSOL ATA exists
   const wsolAtaInfo = await connection.getAccountInfo(wsolAta);
@@ -96,19 +98,33 @@ export async function buildJupiterSwapInstructions(
     );
   }
 
-  // Transfer SOL to wSOL ATA and sync
+  // Transfer ALL SOL (including fees) to wSOL ATA and sync
   wrapInstructions.push(
     SystemProgram.transfer({
       fromPubkey: buyer,
       toPubkey: wsolAta,
-      lamports: solAmountLamports,
+      lamports: totalSolWithFees,
     }),
     createSyncNativeInstruction(wsolAta)
   );
 
-  // Don't close wSOL account - user keeps it for future swaps
-  // This avoids simulation issues with rent refunds
-  // User can close it manually later if they want to recover rent
+  // Transfer fee as wSOL to platform wallet
+  if (platformWallet && feeLamports > BigInt(0)) {
+    const platformWsolAta = getAssociatedTokenAddressSync(NATIVE_MINT, platformWallet, false);
+
+    // Check if platform wSOL ATA exists
+    const platformWsolAtaInfo = await connection.getAccountInfo(platformWsolAta);
+    if (!platformWsolAtaInfo) {
+      feeInstructions.push(
+        createAssociatedTokenAccountInstruction(buyer, platformWsolAta, platformWallet, NATIVE_MINT)
+      );
+    }
+
+    // Transfer wSOL fee to platform
+    feeInstructions.push(
+      createTransferInstruction(wsolAta, platformWsolAta, buyer, feeLamports)
+    );
+  }
 
   // Step 3: Get swap instructions (wrapAndUnwrapSol: false since we handle it)
   const swapInstructionsResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
@@ -124,7 +140,7 @@ export async function buildJupiterSwapInstructions(
 
   if (!swapInstructionsResponse.ok) {
     // Fallback to /swap endpoint if /swap-instructions is not available
-    return buildJupiterSwapFallback(connection, mint, buyer, quote, wrapInstructions, unwrapInstructions);
+    return buildJupiterSwapFallback(connection, mint, buyer, quote, wrapInstructions, feeInstructions);
   }
 
   const swapData: SwapInstructionsResponse = await swapInstructionsResponse.json();
@@ -156,7 +172,7 @@ export async function buildJupiterSwapInstructions(
     swapData.addressLookupTableAddresses
   );
 
-  return { instructions, addressLookupTableAccounts, wrapInstructions, unwrapInstructions };
+  return { instructions, addressLookupTableAccounts, wrapInstructions, feeInstructions };
 }
 
 async function buildJupiterSwapFallback(
@@ -165,12 +181,12 @@ async function buildJupiterSwapFallback(
   buyer: PublicKey,
   quote: QuoteResponse,
   wrapInstructions: TransactionInstruction[],
-  unwrapInstructions: TransactionInstruction[]
+  feeInstructions: TransactionInstruction[]
 ): Promise<{
   instructions: TransactionInstruction[];
   addressLookupTableAccounts: AddressLookupTableAccount[];
   wrapInstructions: TransactionInstruction[];
-  unwrapInstructions: TransactionInstruction[];
+  feeInstructions: TransactionInstruction[];
 }> {
   // Fallback: Use /swap endpoint and deserialize the transaction
   const swapResponse = await fetch(JUPITER_SWAP_API, {
@@ -219,7 +235,7 @@ async function buildJupiterSwapFallback(
     instructions: decompiledMessage.instructions,
     addressLookupTableAccounts,
     wrapInstructions,
-    unwrapInstructions,
+    feeInstructions,
   };
 }
 

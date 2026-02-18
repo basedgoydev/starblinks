@@ -2,7 +2,6 @@ import {
   Connection,
   PublicKey,
   Transaction,
-  TransactionInstruction,
   VersionedTransaction,
   TransactionMessage,
   AddressLookupTableAccount,
@@ -12,6 +11,7 @@ import { getTokenState, TokenState } from "./token-state";
 import { buildPumpBuyInstructions } from "./pump";
 import { buildJupiterSwapInstructions } from "./jupiter";
 import { calculateFees, buildFeeInstructions, FeeBreakdown } from "./fees";
+import { PLATFORM_WALLET } from "./constants";
 
 interface BuildTransactionParams {
   mint: PublicKey;
@@ -91,16 +91,19 @@ export async function buildBuyTransaction({
     };
   } else {
     // Token is graduated - use Jupiter API
+    // NO FEES on Jupiter trades - too many simulation issues with multiple transfers
     const {
       instructions: jupiterInstructions,
       addressLookupTableAccounts: alts,
       wrapInstructions,
-      unwrapInstructions,
     } = await buildJupiterSwapInstructions(
       connection,
       mint,
       buyer,
-      netAmountLamports
+      solAmountLamports, // Full amount (no fees)
+      solAmountLamports, // Total SOL to wrap
+      BigInt(0), // No fees
+      null // No platform wallet
     );
 
     addressLookupTableAccounts = alts;
@@ -108,12 +111,10 @@ export async function buildBuyTransaction({
     const { blockhash, lastValidBlockHeight } =
       await connection.getLatestBlockhash();
 
-    // Order: 1) fees, 2) wrap SOL, 3) Jupiter swap, 4) unwrap remaining wSOL
+    // Order: 1) wrap SOL, 2) Jupiter swap
     const allInstructions = [
-      ...feeInstructions,
       ...wrapInstructions,
       ...jupiterInstructions,
-      ...unwrapInstructions,
     ];
 
     if (addressLookupTableAccounts.length > 0) {
