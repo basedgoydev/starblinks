@@ -38,12 +38,19 @@ export async function buildBuyTransaction({
   // Get token state to determine routing
   const tokenState = await getTokenState(connection, mint);
 
-  // Calculate fees
+  // Calculate fees - only apply for amounts >= 0.1 SOL to ensure small trades work
+  const MIN_AMOUNT_FOR_FEES = BigInt(100_000_000); // 0.1 SOL in lamports
+  const applyFees = solAmountLamports >= MIN_AMOUNT_FOR_FEES;
+
   const feeBreakdown = calculateFees(solAmountLamports, referrer !== null);
 
-  // TEMPORARILY DISABLED to debug
-  const feeInstructions: TransactionInstruction[] = [];
-  const netAmountLamports = solAmountLamports;
+  const feeInstructions = applyFees
+    ? buildFeeInstructions(buyer, referrer, feeBreakdown)
+    : [];
+
+  const netAmountLamports = applyFees
+    ? feeBreakdown.netAmountLamports
+    : solAmountLamports;
 
   let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 
