@@ -37,15 +37,21 @@ export async function buildBuyTransaction({
   // Get token state to determine routing
   const tokenState = await getTokenState(connection, mint);
 
-  // Calculate fees (temporarily disabled for testing)
+  // Fees only apply to bonding curve tokens (not graduated/Jupiter)
+  // Jupiter's wrapAndUnwrapSol conflicts with separate SOL transfers
+  const applyFees = !tokenState.isGraduated && tokenState.bondingCurve;
+
   const feeBreakdown = calculateFees(solAmountLamports, referrer !== null);
 
-  // TEMPORARILY DISABLED: Build fee transfer instructions
-  // const feeInstructions = buildFeeInstructions(buyer, referrer, feeBreakdown);
-  const feeInstructions: any[] = []; // Empty - no fees for now
+  // Only build fee instructions for bonding curve tokens
+  const feeInstructions = applyFees
+    ? buildFeeInstructions(buyer, referrer, feeBreakdown)
+    : [];
 
-  // Use full amount for swap (fees disabled)
-  const netAmountLamports = solAmountLamports;
+  // Net amount: deduct fees only for bonding curve tokens
+  const netAmountLamports = applyFees
+    ? feeBreakdown.netAmountLamports
+    : solAmountLamports;
 
   let addressLookupTableAccounts: AddressLookupTableAccount[] = [];
 
