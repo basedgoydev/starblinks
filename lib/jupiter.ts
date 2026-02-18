@@ -106,10 +106,9 @@ export async function buildJupiterSwapInstructions(
     createSyncNativeInstruction(wsolAta)
   );
 
-  // Close wSOL account after swap to recover rent + any remaining SOL
-  unwrapInstructions.push(
-    createCloseAccountInstruction(wsolAta, buyer, buyer)
-  );
+  // Don't close wSOL account - user keeps it for future swaps
+  // This avoids simulation issues with rent refunds
+  // User can close it manually later if they want to recover rent
 
   // Step 3: Get swap instructions (wrapAndUnwrapSol: false since we handle it)
   const swapInstructionsResponse = await fetch(JUPITER_SWAP_INSTRUCTIONS_API, {
